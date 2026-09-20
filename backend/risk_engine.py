@@ -137,8 +137,8 @@ async def upstream(url, headers=None, body=None, timeout=60):
 
 
 async def goplus_token(pool, entry):
-    cached = _goplus_token_cache
-    if cached.get("expires", 0) > now_ms() and cached.get("keyId") == entry["keyId"]:
+    cached = _goplus_token_cache.get(entry["keyId"]) or {}
+    if cached.get("expires", 0) > now_ms():
         return cached["value"]
     stamp = int(time.time())
     sign = hashlib.sha1((entry["secret"] + str(stamp) + entry["appSecret"]).encode()).hexdigest()
@@ -148,7 +148,7 @@ async def goplus_token(pool, entry):
     if not value:
         raise RiskError("GoPlus authentication failed", 502)
     expires_in = int(result.get("expires_in") or payload.get("expires_in") or 300)
-    _goplus_token_cache.update({"keyId": entry["keyId"], "value": value, "expires": now_ms() + max(1000, expires_in * 1000 - 60000)})
+    _goplus_token_cache[entry["keyId"]] = {"value": value, "expires": now_ms() + max(1000, expires_in * 1000 - 60000)}
     return value
 
 
@@ -172,13 +172,16 @@ async def upstream_pooled(pool, provider, url):
             if status >= 400:
                 raise RiskError("Provider request failed", 502)
             body = response.json()
-            if body.get("code") is not None and int(body.get("code")) != 1:
+            code = body.get("code")
+            if code is not None and int(code) != 1:
+                if provider == "GoPlus" and 4000 <= int(code) < 4100:
+                    status = 401  # GoPlus returns HTTP 200 with an auth error code → cool this key down
                 raise RiskError("Provider response error", 502)
             pool.record_usage(entry["keyId"], True, status)
             return body
         except Exception:
             pool.record_usage(entry["keyId"], False, status)
-            if status in (400, 401, 403):
+            if status in (400, 403):
                 raise RiskError("Provider authorization or request rejected", status)
     # Fall back to the public endpoint when no eligible key is left.
     return await upstream(url)

@@ -58,19 +58,26 @@ class KeyPool:
                 continue
             add(item["provider"], base(item["id"], secret, item.get("label", ""), "vault", active=item.get("active", True) is not False, monthlyLimit=int(item.get("monthlyLimit") or 0), requestCount=int(item.get("requestCount") or 0), successCount=int(item.get("successCount") or 0), expiresAt=item.get("expiresAt")))
 
-        # 2. env fallback keys
-        for provider, secret, expires in [("Helius", env.get("HELIUS_API_KEY"), None), ("Etherscan", env.get("ETHERSCAN_API_KEY"), None), ("Bitquery", env.get("BITQUERY_ACCESS_TOKEN"), parse_date_ms(env.get("BITQUERY_FREE_TRIAL_UNTIL")))]:
-            secret = (secret or "").strip()
-            if not secret or any(e["secret"] == secret for e in pools.get(provider, [])):
-                continue
-            add(provider, base("env-" + provider.lower(), secret, ".env", "env", expiresAt=expires))
+        # 2. env fallback keys (comma-separated lists supported)
+        def env_list(name):
+            return [v.strip() for v in (env.get(name) or "").split(",") if v.strip()]
 
-        goplus_token = (env.get("GOPLUS_ACCESS_TOKEN") or "").strip()
-        if goplus_token and not any(e["secret"] == goplus_token for e in pools.get("GoPlus", [])):
-            add("GoPlus", base("env-goplus", goplus_token, ".env", "env"))
-        app_key, app_secret = (env.get("GOPLUS_APP_KEY") or "").strip(), (env.get("GOPLUS_APP_SECRET") or "").strip()
-        if app_key and app_secret:
-            add("GoPlus", base("vault-app-goplus", app_key, "vault-app", "env", kind="app", appSecret=app_secret))
+        def label(i, n):
+            return ".env" if n == 1 else f".env #{i + 1}"
+
+        bitquery_expiry = parse_date_ms(env.get("BITQUERY_FREE_TRIAL_UNTIL"))
+        for provider, var, expires in [("Helius", "HELIUS_API_KEY", None), ("Etherscan", "ETHERSCAN_API_KEY", None), ("Bitquery", "BITQUERY_ACCESS_TOKEN", bitquery_expiry), ("GoPlus", "GOPLUS_ACCESS_TOKEN", None)]:
+            secrets = env_list(var)
+            for i, secret in enumerate(secrets):
+                if any(e["secret"] == secret for e in pools.get(provider, [])):
+                    continue
+                add(provider, base(f"env-{provider.lower()}" + ("" if i == 0 else f"-{i + 1}"), secret, label(i, len(secrets)), "env", expiresAt=expires))
+
+        app_keys, app_secrets = env_list("GOPLUS_APP_KEY"), env_list("GOPLUS_APP_SECRET")
+        for i, (app_key, app_secret) in enumerate(zip(app_keys, app_secrets)):
+            if any(e["secret"] == app_key for e in pools.get("GoPlus", [])):
+                continue
+            add("GoPlus", base("vault-app-goplus" + ("" if i == 0 else f"-{i + 1}"), app_key, "vault-app" if len(app_keys) == 1 else f"vault-app #{i + 1}", "env", kind="app", appSecret=app_secret))
 
         for provider, pool in pools.items():
             for entry in pool:
