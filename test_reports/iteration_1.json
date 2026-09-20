@@ -1,0 +1,35 @@
+{
+  "summary": "Full backend + frontend testing of the new /admin X Rewards panel (settings, custom tasks, manual users) and the landing X plugin (custom task 'New' badge, claim flow, leaderboard). All 22 backend pytest tests pass and every frontend flow listed in the review request works end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin",
+       "issues": ["React hydration warning: an <option> in the admin risk-engine 'Network' <select> contains a <span data-ve-dynamic> child (not caused by X Rewards code — appears to be tooling-injected wrappers in admin.jsx around option labels). Non-blocking but should be cleaned up so DOM stays valid."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_x_rewards.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Investigate the admin.jsx <option><span> hydration warning surfaced by the ve-dynamic wrapper — replace inner <span> with a text expression inside <option> to keep valid HTML."
+  ],
+  "critical_code_review_comments": [
+    "x_admin_router.PATCH /users/{x_id}: the block that computes points_adjustment when 'points' is in body first resets user['points_adjustment']=0, then computes update['points_adjustment']=target-user_points(user,cfg). That works correctly for the tested case (points=500 → adjustment=500-task_points → resulting total exactly 500), but the temporary mutation of the in-memory user dict is a subtle side-effect — if any code between these lines reads user['points_adjustment'] it would see 0. Consider computing base = user_points({**user,'points_adjustment':0}, cfg) locally without mutating user.",
+    "x_admin_router.PUT /tasks/{task_id}: only checks matched_count; if the payload equals the stored task, modified_count would still be 0 but matched_count is 1 — correctly handled here. Good.",
+    "x_router.verify_task: uses task_points_map(cfg)[task_id]. For custom tasks with check!='none' cfg is rebuilt with the task's own tweet_id which drops other custom_tasks from cfg — task_points_map still works because it iterates cfg['custom_tasks'] rebuilt from spread; verify by asserting other custom tasks stay in the awarded rewards for the same user (tested indirectly).",
+    "x-rewards-admin.jsx TasksPanel: window.confirm is used for Delete on tasks/users — fine for admin tool, but consider unifying with a modal for a11y in future.",
+    "x-rewards-admin.jsx: the x-users-search input relies on a 250ms debounce; keep in mind Playwright/E2E scripts must wait for it."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_x_rewards.py (new)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% (all listed flows pass)"},
+  "test_credentials": "Admin cookie admin_session=testadmintoken123 seeded via Mongo admin_sessions (removed at end). Mock X: GET /api/x/auth/dev-login sets ri_x_session for @robinity_tester.",
+  "seed_data_creation": "Test-created data (TEST_ prefixed custom tasks, TEST_uifront user, TEST_manualuser, TEST_LandingTask) and the dev-000001 mock user were cleaned up after the run. One stray leftover 'TEST_JoinTG v2' from a prior partial pytest run was also removed. A pre-existing custom task 'Join Telegram' (custom-oIx-EiRL) was left untouched as requested.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression tests live at /app/backend/tests/test_x_rewards.py and pass with `pytest`. The test file self-seeds an admin_sessions document; MONGO_URL and DB_NAME come from /app/backend/.env. Cleanup runs at the end of the test class. If you re-run frontend tests, seed the admin session first (script uses page.request with the admin_session cookie for API side-effects because urllib without a UA gets 403 from the preview ingress)."
+}

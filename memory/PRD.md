@@ -23,3 +23,13 @@ ADMIN_OWNER_ADDRESS, ADMIN_AUTH_MASTER_KEY, GOPLUS_*, HELIUS_API_KEY, ETHERSCAN_
 ## Durum
 - Backend: 61/61 test geçti. Frontend: ekran görüntüleri ile doğrulandı (desktop + mobil).
 - Kuyruk: Redis/Postgres yerine Mongo + asyncio arka plan görevi (aynı API sözleşmesi).
+
+## X Rewards admin sekmesi (2026-06) — `/admin` → "𝕏 X Rewards"
+- `x_admin_router.py` → `/api/admin/x/*` (tüm adminler): `GET/PUT settings`, `POST/PUT/DELETE tasks`, `GET/POST users`, `PATCH/DELETE users/{x_id}`.
+- Ayarlar `x_settings` koleksiyonunda (`key: "tasks"`); `.env` (X_TARGET_USERNAME, X_TASK_TWEET_URL, X_QUOTE_TEXT) yalnızca varsayılan. `x_router.task_config(db)` DB'yi okur.
+- Özel görevler: `{id: custom-…, title, text, link, points, check: none|like_rt|quote, active}` → landing Tasks modalında "New" etiketiyle görünür; Tasks butonunda "N new" rozeti. `check=none` → "Claim" (doğrulamasız).
+- Puan modeli: `user_points = Σ(tamamlanan görev puanı, güncel ayardan) + points_adjustment`. Admin toplam puanı yazınca `points_adjustment` hesaplanır.
+- Manuel kullanıcı: `x_id: manual-…`, EVM girilirse liderlik tablosunda görünür.
+- Admin sayfası açılışta `GET /api/admin/me` ile oturumu geri yükler (30 dk cookie).
+- Test: `backend/tests/test_x_rewards.py` (22/22), frontend test ajanı ile uçtan uca geçti (`test_reports/iteration_1.json`).
+- Test için: `/app/memory/test_credentials.md`. `X_DEV_MOCK` şu an 0.

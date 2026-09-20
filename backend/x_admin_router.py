@@ -183,8 +183,7 @@ async def update_user(x_id: str, request: Request):
             user["evm_address"] = evm
     if "points" in body:
         target = parse_points(body.get("points"))
-        user["points_adjustment"] = 0
-        update["points_adjustment"] = target - user_points(user, cfg)
+        update["points_adjustment"] = target - user_points({**user, "points_adjustment": 0}, cfg)
         user["points_adjustment"] = update["points_adjustment"]
     update["points"] = user_points(user, cfg)
     update["points_updated_at"] = now().isoformat()
