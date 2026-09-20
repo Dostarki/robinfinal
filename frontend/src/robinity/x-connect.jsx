@@ -41,7 +41,9 @@ const TASKS = cfg => [
   { id: "follow", title: `Follow @${cfg.target_username}`, text: "Follow the official Robinity Intelligence account on X.", action: "Follow", intent: `https://x.com/intent/follow?screen_name=${cfg.target_username}` },
   { id: "like_rt", title: "Like & repost the announcement", text: "Like and repost the pinned announcement post.", action: "Open post", intent: cfg.tweet_url || null },
   { id: "quote", title: "Quote the announcement", text: "Share the announcement with a quote post of your own.", action: "Quote", intent: cfg.tweet_url ? `https://x.com/intent/post?${new URLSearchParams({ text: cfg.quote_text, url: cfg.tweet_url })}` : null }
-].map(task => ({ ...task, points: cfg.points?.[task.id] ?? 0 }));
+].map(task => ({ ...task, points: cfg.points?.[task.id] ?? 0 })).concat((cfg.custom_tasks || []).map(task => ({
+  id: task.id, title: task.title, text: task.text, action: "Open", intent: task.link || null, points: task.points, custom: true, claim: task.check === "none"
+})));
 
 const ANDROID = /Android/i.test(navigator.userAgent);
 // Android: intent:// forces the installed X app (falls back to the web URL). iOS/desktop: plain https link (universal link opens the X app when installed).
@@ -52,16 +54,16 @@ const appLink = url => {
 };
 
 function TaskCard({ task, state, onVerify, notify }) {
-  const [opened, setOpened] = useState(false);
+  const [opened, setOpened] = useState(Boolean(task.custom && !task.intent));
   const [busy, setBusy] = useState(false);
   const done = state?.done;
   const open = event => { if (!task.intent) { event.preventDefault(); return notify("This task link is not configured yet.", "error"); } setOpened(true); };
   const verify = async () => { setBusy(true); try { await onVerify(task.id); } finally { setBusy(false); } };
-  return <li className={`ri-task${done ? " is-done" : ""}`} data-testid={`task-${task.id}`}>
-    <div><strong>{task.title} <span className="ri-task-points" data-testid={`task-${task.id}-points`}>+{task.points} pts</span></strong><p>{task.text}</p></div>
+  return <li className={`ri-task${done ? " is-done" : ""}${task.custom ? " is-custom" : ""}`} data-testid={`task-${task.id}`}>
+    <div><strong>{task.custom && <span className="ri-task-new">New</span>}{task.title} <span className="ri-task-points" data-testid={`task-${task.id}-points`}>+{task.points} pts</span></strong><p>{task.text}</p></div>
     {done ? <span className="ri-task-done" data-testid={`task-${task.id}-done`}>✓ Done · +{task.points}</span> : <div className="ri-task-actions">
-      <a className="ri-button ri-button-quiet" href={task.intent ? appLink(task.intent) : "#"} target={ANDROID ? undefined : "_blank"} rel="noopener noreferrer" onClick={open} data-testid={`task-${task.id}-open-button`}>{task.action} ↗</a>
-      <button type="button" className="ri-button ri-button-primary" onClick={verify} disabled={busy || !opened} title={opened ? "" : "Open the task first"} data-testid={`task-${task.id}-verify-button`}>{busy ? "Checking…" : "Verify"}</button>
+      {(task.intent || !task.custom) && <a className="ri-button ri-button-quiet" href={task.intent ? appLink(task.intent) : "#"} target={ANDROID ? undefined : "_blank"} rel="noopener noreferrer" onClick={open} data-testid={`task-${task.id}-open-button`}>{task.action} ↗</a>}
+      <button type="button" className="ri-button ri-button-primary" onClick={verify} disabled={busy || !opened} title={opened ? "" : "Open the task first"} data-testid={`task-${task.id}-verify-button`}>{busy ? "Checking…" : task.claim ? "Claim" : "Verify"}</button>
     </div>}
   </li>;
 }
@@ -103,7 +105,7 @@ function LeaderboardPanel({ user, onClose }) {
         {data.entries.map(entry => <li key={entry.x_id} className={`ri-lb-row${user?.x_id === entry.x_id ? " is-me" : ""}`} data-testid={`leaderboard-row-${entry.rank}`}>
           <span className="ri-lb-rank">{medal(entry.rank)}</span>
           <img src={entry.profile_image_url || "/assets/robinity-logo.png"} alt="" />
-          <span className="ri-lb-user"><strong>@{entry.username}</strong>{user?.x_id === entry.x_id && <em>you</em>}<small>{entry.completed}/3 tasks</small></span>
+          <span className="ri-lb-user"><strong>@{entry.username}</strong>{user?.x_id === entry.x_id && <em>you</em>}<small>{entry.completed}/{data.total_tasks ?? 3} tasks</small></span>
           <span className="ri-lb-points" data-testid={`leaderboard-points-${entry.rank}`}>{entry.points} <small>pts</small></span>
         </li>)}
       </ol>}
@@ -132,10 +134,11 @@ export function XConnect() {
     window.location.href = `${API}/auth/login`;
   };
   const logout = async () => { await api("/logout", { method: "POST" }); setUser(null); setTasksOpen(false); };
+  const newTasks = user && cfg ? (cfg.custom_tasks || []).filter(task => !user.tasks?.[task.id]?.done).length : 0;
   return <div className="ri-header-x" data-testid="x-connect-area">
     <button type="button" className="ri-button ri-button-quiet ri-lb-button" onClick={() => setBoardOpen(true)} data-testid="leaderboard-button">Leaderboard</button>
     {user ? <>
-      <button type="button" className="ri-button ri-button-quiet ri-tasks-button" onClick={() => setTasksOpen(true)} data-testid="tasks-button">Tasks{user.points ? <span className="ri-tasks-pts" data-testid="tasks-button-points">{user.points} pts</span> : null}</button>
+      <button type="button" className="ri-button ri-button-quiet ri-tasks-button" onClick={() => setTasksOpen(true)} data-testid="tasks-button">Tasks{user.points ? <span className="ri-tasks-pts" data-testid="tasks-button-points">{user.points} pts</span> : null}{newTasks ? <span className="ri-tasks-new" data-testid="tasks-button-new">{newTasks} new</span> : null}</button>
       <div className="ri-x-profile" data-testid="x-profile">
         <img src={user.profile_image_url || "/assets/robinity-logo.png"} alt={`@${user.username}`} data-testid="x-profile-image" />
         <span data-testid="x-profile-username">@{user.username}</span>

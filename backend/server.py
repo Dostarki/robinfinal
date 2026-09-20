@@ -68,6 +68,7 @@ async def get_status_checks():
 
 # ─── Routers ──────────────────────────────────────────────────────────────────
 from x_router import router as x_router          # noqa: E402  (landing page X plugin)
+from x_admin_router import router as x_admin_router  # noqa: E402  (admin: X tasks & users)
 from admin_router import router as admin_router  # noqa: E402  (wallet+TOTP admin, vault, deployments)
 from risk_router import router as risk_router    # noqa: E402  (Intelligence analyses)
 from key_pool import KeyPool                     # noqa: E402
@@ -75,6 +76,7 @@ from creator_service import CreatorService       # noqa: E402
 
 app.include_router(api_router)
 app.include_router(x_router)
+app.include_router(x_admin_router)
 app.include_router(admin_router)
 app.include_router(risk_router)
 

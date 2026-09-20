@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { PublicFooter, PublicHeader } from "./landing.jsx";
 import ApiMonitor from "./api-monitor.jsx";
+import XRewardsAdmin from "./x-rewards-admin.jsx";
 import { TEST_ADMIN_ARTIFACTS } from "./admin-artifacts.js";
 
 const NETWORKS = {
@@ -45,6 +46,7 @@ const TRANSLATIONS = {
     tabApi: "🔑 API Key Pool",
     tabAdmins: "👥 Administrators",
     tabActivity: "📜 Activity Log",
+    tabX: "𝕏 X Rewards",
     deploymentSelection: "Saved Deployment Selection",
     newDeployment: "+ New Deployment",
     selectDeploymentPlaceholder: "-- Choose a saved deployment --",
@@ -159,6 +161,7 @@ const TRANSLATIONS = {
     tabApi: "🔑 API Key Havuzu",
     tabAdmins: "👥 Yöneticiler",
     tabActivity: "📜 İşlem Geçmişi",
+    tabX: "𝕏 X Ödülleri",
     deploymentSelection: "Kayıtlı Deployment Seçimi",
     newDeployment: "+ Yeni Deployment",
     selectDeploymentPlaceholder: "-- Kayıtlı bir deployment seçin --",
@@ -273,6 +276,7 @@ const TRANSLATIONS = {
     tabApi: "🔑 API 密钥池",
     tabAdmins: "👥 管理员",
     tabActivity: "📜 操作日志",
+    tabX: "𝕏 X 奖励",
     deploymentSelection: "已保存的部署选择",
     newDeployment: "+ 新建部署",
     selectDeploymentPlaceholder: "-- 选择已保存的部署 --",
@@ -582,6 +586,10 @@ export default function AdminApp() {
   };
 
   // Lifecycle
+  useEffect(() => {
+    API("/api/admin/me").then(data => { setUser(data); setPhase("panel"); }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (phase === "panel") {
       refreshSharedState();
@@ -1088,6 +1096,9 @@ export default function AdminApp() {
           <button className={`admin-tab ${activeTab === "activity" ? "active" : ""}`} onClick={() => setActiveTab("activity")}>
             {t.tabActivity} ({sharedActivity.length})
           </button>
+          <button className={`admin-tab ${activeTab === "xrewards" ? "active" : ""}`} onClick={() => setActiveTab("xrewards")} data-testid="admin-tab-xrewards">
+            {t.tabX}
+          </button>
         </div>
 
         {/* Action Status Banner */}
@@ -1381,6 +1392,9 @@ export default function AdminApp() {
             </section>
           </div>
         )}
+
+        {/* TAB 5: X REWARDS */}
+        {activeTab === "xrewards" && <XRewardsAdmin />}
 
         {/* TAB 4: ACTIVITY LOG */}
         {activeTab === "activity" && (

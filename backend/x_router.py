@@ -37,14 +37,36 @@ def tweet_id_from_url(url):
     return match.group(1) if match else None
 
 
-def task_config():
-    tweet_url = env("X_TASK_TWEET_URL", "")
+def env_defaults():
     return {
         "target_username": env("X_TARGET_USERNAME", "RobinityInt"),
-        "tweet_url": tweet_url,
-        "tweet_id": tweet_id_from_url(tweet_url),
+        "tweet_url": env("X_TASK_TWEET_URL", ""),
         "quote_text": env("X_QUOTE_TEXT", "Robinity Intelligence — token research with context. @RobinityInt"),
+        "points": dict(TASK_POINTS),
+        "custom_tasks": [],
     }
+
+
+async def task_config(db):
+    """Admin-managed settings (x_settings) win over .env defaults."""
+    cfg = env_defaults()
+    saved = await db.x_settings.find_one({"key": "tasks"}, {"_id": 0}) or {}
+    for field in ("target_username", "tweet_url", "quote_text"):
+        if isinstance(saved.get(field), str):
+            cfg[field] = saved[field].strip()
+    if isinstance(saved.get("points"), dict):
+        cfg["points"].update({k: int(v) for k, v in saved["points"].items() if k in TASK_IDS})
+    cfg["custom_tasks"] = [t for t in saved.get("custom_tasks") or [] if t.get("active", True)]
+    cfg["tweet_id"] = tweet_id_from_url(cfg["tweet_url"])
+    cfg["target_username"] = cfg["target_username"].lstrip("@") or "RobinityInt"
+    return cfg
+
+
+def task_points_map(cfg):
+    points = dict(cfg["points"])
+    for task in cfg["custom_tasks"]:
+        points[task["id"]] = int(task.get("points") or 0)
+    return points
 
 
 def configured():
@@ -66,11 +88,16 @@ async def current_user(request: Request):
     return await db.x_users.find_one({"x_id": session["x_id"]}, {"_id": 0})
 
 
-def user_points(user):
-    return sum(TASK_POINTS[t] for t in TASK_IDS if user.get("tasks", {}).get(t, {}).get("done"))
+def user_points(user, cfg):
+    points = task_points_map(cfg)
+    earned = 0
+    for task_id, entry in (user.get("tasks") or {}).items():
+        if entry.get("done"):
+            earned += points.get(task_id, int(entry.get("points") or 0))
+    return max(0, earned + int(user.get("points_adjustment") or 0))
 
 
-def public_user(user):
+def public_user(user, cfg):
     if not user:
         return None
     return {
@@ -80,26 +107,28 @@ def public_user(user):
         "profile_image_url": user.get("profile_image_url"),
         "evm_address": user.get("evm_address"),
         "tasks": user.get("tasks", {}),
-        "points": user_points(user),
+        "points": user_points(user, cfg),
     }
 
 
 @router.get("/config")
-async def get_config():
-    cfg = task_config()
-    return {"configured": configured(), "target_username": cfg["target_username"], "tweet_url": cfg["tweet_url"], "tweet_id": cfg["tweet_id"], "quote_text": cfg["quote_text"], "points": TASK_POINTS}
+async def get_config(request: Request):
+    cfg = await task_config(get_db(request))
+    return {"configured": configured(), "target_username": cfg["target_username"], "tweet_url": cfg["tweet_url"], "tweet_id": cfg["tweet_id"], "quote_text": cfg["quote_text"], "points": cfg["points"],
+            "custom_tasks": [{"id": t["id"], "title": t["title"], "text": t.get("text") or "", "link": t.get("link") or "", "points": int(t.get("points") or 0), "check": t.get("check") or "none"} for t in cfg["custom_tasks"]]}
 
 
 @router.get("/leaderboard")
 async def leaderboard(request: Request):
     db = get_db(request)
+    cfg = await task_config(db)
     total = await db.x_users.count_documents({"evm_address": {"$exists": True}})
-    cursor = db.x_users.find({"evm_address": {"$exists": True}}, {"_id": 0, "x_id": 1, "username": 1, "name": 1, "profile_image_url": 1, "tasks": 1, "points": 1, "points_updated_at": 1})
+    cursor = db.x_users.find({"evm_address": {"$exists": True}}, {"_id": 0, "x_id": 1, "username": 1, "name": 1, "profile_image_url": 1, "tasks": 1, "points": 1, "points_adjustment": 1, "points_updated_at": 1})
     users = await cursor.to_list(length=None)
-    users.sort(key=lambda u: (-user_points(u), u.get("points_updated_at") or "\uffff"))
-    entries = [{"rank": i + 1, "x_id": u["x_id"], "username": u["username"], "name": u.get("name"), "profile_image_url": u.get("profile_image_url"), "points": user_points(u),
-                "completed": sum(1 for t in TASK_IDS if u.get("tasks", {}).get(t, {}).get("done"))} for i, u in enumerate(users[:10])]
-    return {"entries": entries, "total_participants": total, "points": TASK_POINTS}
+    users.sort(key=lambda u: (-user_points(u, cfg), u.get("points_updated_at") or "\uffff"))
+    entries = [{"rank": i + 1, "x_id": u["x_id"], "username": u["username"], "name": u.get("name"), "profile_image_url": u.get("profile_image_url"), "points": user_points(u, cfg),
+                "completed": sum(1 for t in (u.get("tasks") or {}).values() if t.get("done"))} for i, u in enumerate(users[:10])]
+    return {"entries": entries, "total_participants": total, "points": cfg["points"], "total_tasks": len(TASK_IDS) + len(cfg["custom_tasks"])}
 
 
 @router.get("/auth/login")
@@ -173,7 +202,7 @@ async def dev_login(request: Request):
 
 @router.get("/me")
 async def me(request: Request):
-    return {"user": public_user(await current_user(request))}
+    return {"user": public_user(await current_user(request), await task_config(get_db(request)))}
 
 
 @router.post("/logout")
@@ -201,7 +230,7 @@ async def save_evm(body: EvmBody, request: Request):
         raise HTTPException(400, "Invalid EVM address")
     await get_db(request).x_users.update_one({"x_id": user["x_id"]}, {"$set": {"evm_address": address, "evm_saved_at": now().isoformat()}})
     user["evm_address"] = address
-    return {"user": public_user(user)}
+    return {"user": public_user(user, await task_config(get_db(request)))}
 
 
 async def refresh_access_token(db, user):
@@ -279,28 +308,33 @@ CHECKS = {"follow": check_follow, "like_rt": check_like_rt, "quote": check_quote
 
 @router.post("/tasks/{task_id}/verify")
 async def verify_task(task_id: str, request: Request):
-    if task_id not in TASK_IDS:
+    db = get_db(request)
+    cfg = await task_config(db)
+    custom = next((t for t in cfg["custom_tasks"] if t["id"] == task_id), None)
+    if task_id not in TASK_IDS and not custom:
         raise HTTPException(404, "Unknown task")
     user = await current_user(request)
     if not user:
         raise HTTPException(401, "Connect X first")
     if not user.get("evm_address"):
         raise HTTPException(400, "Save your EVM address first")
-    cfg = task_config()
-    if task_id != "follow" and not cfg["tweet_id"]:
+    check = task_id if not custom else (custom.get("check") or "none")
+    if custom and check != "none":
+        cfg = {**cfg, "tweet_id": tweet_id_from_url(custom.get("link"))}
+    if check in ("like_rt", "quote") and not cfg["tweet_id"]:
         raise HTTPException(503, "Task tweet link is not configured")
-    db = get_db(request)
-    token = user["access_token"]
-    if datetime.fromisoformat(user["token_expires_at"]) < now() + timedelta(minutes=1):
+    token = user.get("access_token")
+    if check != "none" and datetime.fromisoformat(user["token_expires_at"]) < now() + timedelta(minutes=1):
         token = await refresh_access_token(db, user)
-    if token == "dev":
+    if token == "dev" or check == "none":
         result = None
     else:
         async with httpx.AsyncClient(timeout=20) as client:
-            result = await CHECKS[task_id](client, token, user, cfg)
+            result = await CHECKS[check](client, token, user, cfg)
     if result is False:
         raise HTTPException(422, "Not completed yet on X. Finish the action, then verify again.")
-    entry = {"done": True, "verified": result is True, "completed_at": now().isoformat(), "points": TASK_POINTS[task_id]}
+    awarded = task_points_map(cfg)[task_id]
+    entry = {"done": True, "verified": result is True, "completed_at": now().isoformat(), "points": awarded}
     user.setdefault("tasks", {})[task_id] = entry
-    await db.x_users.update_one({"x_id": user["x_id"]}, {"$set": {f"tasks.{task_id}": entry, "points": user_points(user), "points_updated_at": entry["completed_at"]}})
-    return {"user": public_user(user), "verified": result is True, "points_awarded": TASK_POINTS[task_id]}
+    await db.x_users.update_one({"x_id": user["x_id"]}, {"$set": {f"tasks.{task_id}": entry, "points": user_points(user, cfg), "points_updated_at": entry["completed_at"]}})
+    return {"user": public_user(user, cfg), "verified": result is True, "points_awarded": awarded}
