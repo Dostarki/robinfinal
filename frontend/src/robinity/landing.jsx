@@ -8,19 +8,7 @@ const X_URL = "https://x.com/robinityint";
 const TOTAL_SUPPLY = 1_000_000_000;
 
 export function ComingSoonButton({ className = "ri-button ri-button-primary" }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(() => setOpen(false), 6000);
-    return () => clearTimeout(timer);
-  }, [open]);
-  return <>
-    <button type="button" data-testid="open-intelligence-soon-button" className={className} onClick={() => setOpen(true)}>Open Intelligence <span>↗</span></button>
-    {open && createPortal(<div className="ri-soon-toast" role="status" data-testid="soon-toast">
-      <p><strong>Coming soon.</strong> Intelligence will be announced shortly — stay tuned on <a href={X_URL} target="_blank" rel="noreferrer" data-testid="soon-toast-x-link">X (@robinityint)</a>.</p>
-      <button type="button" className="ri-soon-toast-close" data-testid="soon-toast-close" aria-label="Dismiss notification" onClick={() => setOpen(false)}>×</button>
-    </div>, document.body)}
-  </>;
+  return <a href="/intelligence" data-testid="open-intelligence-button" className={className}>Open Intelligence <span>↗</span></a>;
 }
 
 
